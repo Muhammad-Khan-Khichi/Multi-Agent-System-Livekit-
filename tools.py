@@ -8,6 +8,8 @@ from livekit.agents.llm import function_tool
 from pydantic import Field
 
 from rag.search import search_menu as _search_menu
+from rag.search import search_all as _search_all
+from rag.search import search_allergens as _search_allergens
 from userData import UserData
 from utils import validate_phone, validate_name
 
@@ -57,6 +59,36 @@ async def to_greeter(context: RunContext_T) -> tuple[Agent, str]:
     return await curr_agent._transfer_to_agent("greeter", context)
 
 
+def _format_result(result: dict) -> str:
+    """Format a single search result into a readable string,
+    handling different source types (menu, faq, policies)."""
+    source = result.get("source", "")
+    meta = result.get("metadata", {})
+
+    if source == "menu":
+        name = meta.get("name", "Unknown")
+        price = meta.get("price", 0)
+        category = meta.get("category", "")
+        description = meta.get("description", "")
+        tags = meta.get("tags", [])
+        tag_str = f" [{', '.join(tags)}]" if tags else ""
+        return f"{name} (${price:.2f}, {category}) — {description}{tag_str}"
+
+    elif source == "faq":
+        question = meta.get("question", "")
+        answer = meta.get("answer", "")
+        return f"Q: {question}\nA: {answer}"
+
+    elif source == "policies":
+        topic = meta.get("topic", "")
+        content = meta.get("content", "")
+        return f"Policy — {topic}: {content}"
+
+    else:
+        # Fallback: just return the content field
+        return result.get("content", "")
+
+
 @function_tool()
 async def search_knowledge(
     query: Annotated[
@@ -75,15 +107,59 @@ async def search_knowledge(
     categories, or dietary options. Use this instead of guessing from memory."""
     try:
         results = _search_menu(query, k=3)
-    except FileNotFoundError as e:
-        logger.error(f"Menu index not found: {e}")
+    except Exception as e:
+        logger.error(f"Menu search failed: {e}")
         return "Sorry, I can't look up the menu right now."
 
     if not results:
         return "I couldn't find anything matching that on the menu."
 
-    lines = [
-        f"{item['name']} (${item['price']:.2f}) — {item['description']}"
-        for item in results
-    ]
+    lines = [_format_result(item) for item in results]
     return "Here's what I found:\n" + "\n".join(lines)
+
+
+@function_tool()
+async def search_faq_knowledge(
+    query: Annotated[
+        str,
+        Field(
+            description=(
+                "Natural-language question about restaurant policies, "
+                "FAQ, hours, parking, cancellation, refund, etc."
+            )
+        ),
+    ],
+    context: RunContext_T,
+) -> str:
+    """Called whenever the user asks about restaurant policies, FAQ,
+    hours, parking, cancellation, refund, or other general questions.
+    Use this instead of guessing from memory."""
+    try:
+        results = _search_all(query, k=5)
+    except Exception as e:
+        logger.error(f"FAQ search failed: {e}")
+        return "Sorry, I can't look up that information right now."
+
+    if not results:
+        return "I couldn't find any information about that."
+
+    lines = [_format_result(item) for item in results]
+    return "Here's what I found:\n" + "\n".join(lines)
+
+
+@function_tool()
+async def search_allergen_info(
+    item_name: Annotated[
+        str,
+        Field(description="The name of the menu item to check allergens for"),
+    ],
+    context: RunContext_T,
+) -> str:
+    """Called when the user asks about allergens, dietary restrictions,
+    or ingredients in a specific menu item."""
+    try:
+        result = _search_allergens(item_name)
+        return result
+    except Exception as e:
+        logger.error(f"Allergen search failed: {e}")
+        return "Sorry, I can't look up allergen information right now."
