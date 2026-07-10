@@ -31,10 +31,22 @@ async def entrypoint(ctx: JobContext):
             "faq": FAQAgent(),
         }
     )
+
     session = AgentSession[UserData](
         userdata=userdata,
+        # ── VAD: Voice Activity Detection ─────────────────────────────        # Detects when the user starts/stops speaking so the agent
+        # knows when to listen and when to respond.
+        vad=inference.VAD(
+            model="silero",
+            min_speech_duration=0.3,    # seconds of speech before activating
+            min_silence_duration=0.5,   # seconds of silence before ending turn
+            padding_duration=0.3,       # audio padding around speech segments
+        ),
+        # ── STT: Speech-to-Text ──────────────────────────────────────
         stt=inference.STT(model="deepgram/nova-3"),
+        # ── LLM: Large Language Model ────────────────────────────────
         llm=inference.LLM(model="openai/gpt-4.1-mini"),
+        # ── TTS: Text-to-Speech ──────────────────────────────────────
         tts=inference.TTS(model="cartesia/sonic-3"),
         max_tool_steps=5,
     )
