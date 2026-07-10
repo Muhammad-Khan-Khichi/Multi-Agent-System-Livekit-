@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from livekit.agents import AgentServer, AgentSession, JobContext, cli, inference
 
 from agents.checkout import Checkout
+from agents.faq import FAQAgent
 from agents.greeter import Greeter
 from agents.reservation import Reservation
 from agents.takeaway import Takeaway
@@ -27,6 +28,7 @@ async def entrypoint(ctx: JobContext):
             "reservation": Reservation(),
             "takeaway": Takeaway(MENU),
             "checkout": Checkout(MENU),
+            "faq": FAQAgent(),
         }
     )
     session = AgentSession[UserData](
