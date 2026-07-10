@@ -1,0 +1,16 @@
+﻿{
+  "Pizza": ["gluten", "dairy"],
+  "Salad": ["none"],
+  "Ice Cream": ["dairy"],
+  "Coffee": ["none"],
+  "Pasta": ["gluten", "dairy", "egg"],
+  "Burger": ["gluten", "dairy"],
+  "Fries": ["none"],
+  "Soup": ["dairy"],
+  "Smoothie": ["dairy"],
+  "Veggie Pizza": ["gluten", "dairy"],
+  "Vegan Salad": ["none"],
+  "Kids Pizza": ["gluten", "dairy"],
+  "Kids Burger": ["gluten", "dairy"],
+  "Kids Fries": ["none"]
+}
