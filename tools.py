@@ -9,6 +9,7 @@ from pydantic import Field
 
 from rag.search import search_menu as _search_menu
 from userData import UserData
+from utils import validate_phone, validate_name
 
 if TYPE_CHECKING:
     from agents.base import BaseAgent
@@ -25,6 +26,9 @@ async def update_name(
 ) -> str:
     """Called when the user provides their name.
     Confirm the spelling with the user before calling the function."""
+    if not validate_name(name):
+        return "That doesn't look like a valid name. Please provide your name again."
+
     userdata = context.userdata
     userdata.customer_name = name
     return f"The name is updated to {name}"
@@ -37,6 +41,9 @@ async def update_phone(
 ) -> str:
     """Called when the user provides their phone number.
     Confirm the spelling with the user before calling the function."""
+    if not validate_phone(phone):
+        return "That doesn't look like a valid phone number. Please try again."
+
     userdata = context.userdata
     userdata.customer_phone = phone
     return f"The phone number is updated to {phone}"
