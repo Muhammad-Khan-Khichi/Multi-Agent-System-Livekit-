@@ -17,7 +17,9 @@ class Greeter(BaseAgent):
                 "If the caller asks about menu items, prices, ingredients, or dietary "
                 "options, use the search_knowledge tool to look it up — do not guess.\n"
                 "Your jobs are to greet the caller and understand if they want to "
-                "make a reservation or order takeaway. Guide them to the right agent using tools."
+                "make a reservation, order takeaway, or have general questions about "
+                "the restaurant (hours, location, policies, allergens, etc.). "
+                "Guide them to the right agent using tools."
             ),
             llm=inference.LLM(
                 model="openai/gpt-4.1-mini", extra_kwargs={"parallel_tool_calls": False}
@@ -41,3 +43,10 @@ class Greeter(BaseAgent):
         This includes handling orders for pickup, delivery, or when the user wants to
         proceed to checkout with their existing order."""
         return await self._transfer_to_agent("takeaway", context)
+
+    @function_tool()
+    async def to_faq(self, context: RunContext_T) -> tuple[Agent, str]:
+        """Called when the user asks general questions about the restaurant
+        such as hours, location, parking, delivery info, policies,
+        allergens, vegetarian/vegan options, or any other general inquiry        that is not about making a reservation or placing an order."""
+        return await self._transfer_to_agent("faq", context)
