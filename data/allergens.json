@@ -1,16 +1,42 @@
 ﻿{
-  "Pizza": ["gluten", "dairy"],
-  "Salad": ["none"],
-  "Ice Cream": ["dairy"],
-  "Coffee": ["none"],
-  "Pasta": ["gluten", "dairy", "egg"],
-  "Burger": ["gluten", "dairy"],
-  "Fries": ["none"],
-  "Soup": ["dairy"],
-  "Smoothie": ["dairy"],
-  "Veggie Pizza": ["gluten", "dairy"],
-  "Vegan Salad": ["none"],
-  "Kids Pizza": ["gluten", "dairy"],
-  "Kids Burger": ["gluten", "dairy"],
-  "Kids Fries": ["none"]
+  "pizza": {
+    "contains": ["gluten", "milk", "wheat"],
+    "may_contain": ["soy", "eggs"]
+  },
+  "salad": {
+    "contains": [],
+    "may_contain": ["milk"]
+  },
+  "ice cream": {
+    "contains": ["milk"],
+    "may_contain": ["nuts", "soy"]
+  },
+  "coffee": {
+    "contains": [],
+    "may_contain": []
+  },
+  "chicken burger": {
+    "contains": ["gluten", "wheat"],
+    "may_contain": ["milk", "soy", "eggs"]
+  },
+  "fries": {
+    "contains": [],
+    "may_contain": ["gluten"]
+  },
+  "pasta": {
+    "contains": ["gluten", "wheat", "eggs"],
+    "may_contain": ["milk"]
+  },
+  "soup": {
+    "contains": ["milk"],
+    "may_contain": ["gluten"]
+  },
+  "burger": {
+    "contains": ["gluten", "wheat"],
+    "may_contain": ["milk", "soy", "eggs", "sesame"]
+  },
+  "steak": {
+    "contains": [],
+    "may_contain": ["milk", "soy"]
+  }
 }

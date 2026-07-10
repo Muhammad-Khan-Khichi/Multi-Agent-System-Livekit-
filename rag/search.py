@@ -1,224 +1,205 @@
-﻿"""
-Loads the FAISS index built by build_index.py and exposes search functions
-that agents can call to answer questions about the menu, FAQ, policies,
-and allergens semantically instead of relying on text being stuffed into
-every prompt.
-"""
+﻿from __future__ import annotations
 
 import json
 import logging
-import pickle
 from pathlib import Path
-from threading import Lock
 
 import faiss
-import numpy as np
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger("rag.search")
 
+# Paths
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 
-# Paths for each index
-INDEX_PATHS = {
-    "menu": DATA_DIR / "menu.index",
-    "faq": DATA_DIR / "faq.index",
-    "policies": DATA_DIR / "policies.index",
-}
-STORE_PATHS = {
-    "menu": DATA_DIR / "menu_store.pkl",
-    "faq": DATA_DIR / "faq_store.pkl",
-    "policies": DATA_DIR / "policies_store.pkl",
-}
+# Embedding model
+EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
-# Static data files
-ALLERGENS_PATH = DATA_DIR / "allergens.json"
-
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-
-_model: SentenceTransformer | None = None
+# Globals (lazy-loaded)
+_embedder: SentenceTransformer | None = None
 _indexes: dict[str, faiss.Index] = {}
-_stores: dict[str, dict] = {}
-_allergens: dict[str, list[str]] = {}
-_load_lock = Lock()
+_metadata: dict[str, list[dict]] = {}
+_allergens: dict[str, dict] = {}
 
 
 def _ensure_loaded() -> None:
-    """Lazy-load the model/indexes/stores once, thread-safe."""
-    global _model, _indexes, _stores, _allergens
+    """Load the embedding model, FAISS indexes, metadata, and allergen data
+    on first use. Safe against missing or corrupted files."""
+    global _embedder, _indexes, _metadata, _allergens
 
-    if _model is not None and _indexes and _stores and _allergens:
+    if _embedder is not None:
         return
 
-    with _load_lock:
-        if _model is None:
-            logger.info(f"Loading embedding model: {EMBEDDING_MODEL}")
-            _model = SentenceTransformer(EMBEDDING_MODEL)
+    logger.info(f"Loading embedding model: {EMBED_MODEL}")
+    _embedder = SentenceTransformer(EMBED_MODEL)
 
-        # Load each index + store
-        for name in ("menu", "faq", "policies"):
-            if name not in _indexes:
-                index_path = INDEX_PATHS[name]
-                store_path = STORE_PATHS[name]
+    # Load FAISS indexes + metadata
+    for name in ["menu", "faq", "policies"]:
+        index_path = DATA_DIR / f"{name}.index"
+        meta_path = DATA_DIR / f"{name}_metadata.json"
 
-                if not index_path.exists():
-                    logger.warning(f"Index not found: {index_path}. Skipping '{name}' search.")
-                    continue
-                if not store_path.exists():
-                    logger.warning(f"Store not found: {store_path}. Skipping '{name}' search.")
-                    continue
+        if index_path.exists() and meta_path.exists():
+            logger.info(f"Loading FAISS index: {index_path}")
+            _indexes[name] = faiss.read_index(str(index_path))
 
-                logger.info(f"Loading FAISS index: {index_path}")
-                _indexes[name] = faiss.read_index(str(index_path))
+            with open(meta_path, "r", encoding="utf-8-sig") as f:
+                _metadata[name] = json.load(f)
+        else:
+            logger.warning(
+                f"Index or metadata not found for '{name}', skipping. "
+                f"Run `uv run python -m rag.build_index` to build indexes."
+            )
 
-                with open(store_path, "rb") as f:
-                    _stores[name] = pickle.load(f)
+    # Safe allergen loading
+    allergen_path = DATA_DIR / "allergens.json"
+    if allergen_path.exists():
+        try:
+            with open(allergen_path, "r", encoding="utf-8-sig") as f:
+                content = f.read().strip()
+                if content:
+                    _allergens = json.loads(content)
+                    logger.info(f"Loaded allergen data: {len(_allergens)} items")
+                else:
+                    logger.warning("allergens.json is empty, using empty dict.")
+                    _allergens = {}
+        except json.JSONDecodeError as e:
+            logger.warning(f"allergens.json has invalid JSON: {e}. Using empty dict.")
+            _allergens = {}
+    else:
+        logger.warning("allergens.json not found, using empty dict.")
+        _allergens = {}
 
-        # Load allergen data (static JSON, no index needed)
-        if not _allergens:
-            if ALLERGENS_PATH.exists():
-                with open(ALLERGENS_PATH, "r") as f:
-                    _allergens = json.load(f)
-                logger.info(f"Loaded allergen data: {len(_allergens)} items")
-            else:
-                logger.warning(f"Allergens file not found: {ALLERGENS_PATH}")
-                _allergens = {}
 
+def _search_index(
+    index_name: str, query: str, k: int = 3
+) -> list[dict]:
+    """Search a specific FAISS index and return matching results.
 
-def _search_index(index_name: str, query: str, k: int = 3) -> list[dict]:
-    """Search a single FAISS index and return results."""
+    Returns a list of dicts, each with:
+        - source: index name
+        - content: the matched text
+        - score: similarity score (lower = better for L2)
+        - metadata: any extra metadata from the original entry
+    """
     _ensure_loaded()
 
-    if index_name not in _indexes or index_name not in _stores:
+    if index_name not in _indexes:
+        logger.warning(f"Index '{index_name}' not loaded.")
+        return []
+
+    if index_name not in _metadata:
+        logger.warning(f"Metadata for '{index_name}' not loaded.")
         return []
 
     index = _indexes[index_name]
-    store = _stores[index_name]
-    assert _model is not None
+    metadata = _metadata[index_name]
 
-    query_vec = _model.encode([query], convert_to_numpy=True).astype("float32")
-    faiss.normalize_L2(query_vec)
-
-    k = min(k, len(store["items"]))
-    if k == 0:
+    if index.ntotal == 0:
+        logger.warning(f"Index '{index_name}' is empty.")
         return []
 
+    # Limit k to available entries
+    k = min(k, index.ntotal)
+
+    # Embed the query
+    query_vec = _embedder.encode([query], convert_to_numpy=True)
+    query_vec = query_vec.astype("float32")
+
+    # Search
     scores, indices = index.search(query_vec, k)
 
     results = []
-    for idx, score in zip(indices[0], scores[0]):
+    for rank, (score, idx) in enumerate(zip(scores[0], indices[0])):
         if idx == -1:
             continue
-        item = dict(store["items"][idx])
-        item["relevance_score"] = float(score)
-        results.append(item)
+
+        entry = metadata[idx]
+        results.append(
+            {
+                "source": index_name,
+                "content": entry.get("content", ""),
+                "score": float(score),
+                "rank": rank,
+                "metadata": entry,
+            }
+        )
 
     return results
 
 
 def search_menu(query: str, k: int = 3) -> list[dict]:
-    """
-    Semantic search over the menu.
-
-    Args:
-        query: natural-language question, e.g. "something vegetarian under $6"
-        k: number of results to return
-
-    Returns:
-        List of menu item dicts (name, category, price, description, tags),
-        ordered by relevance.
-    """
+    """Search the menu index for items matching the query."""
     return _search_index("menu", query, k)
 
 
 def search_faq(query: str, k: int = 3) -> list[dict]:
-    """
-    Semantic search over FAQ entries.
-
-    Returns:
-        List of FAQ dicts (question, answer), ordered by relevance.
-    """
+    """Search the FAQ index for answers matching the query."""
     return _search_index("faq", query, k)
 
 
 def search_policies(query: str, k: int = 3) -> list[dict]:
-    """
-    Semantic search over restaurant policies.
-
-    Returns:
-        List of policy dicts (topic, content), ordered by relevance.
-    """
+    """Search the policies index for policy information."""
     return _search_index("policies", query, k)
 
 
-def search_all(query: str, k: int = 3) -> list[dict]:
-    """
-    Search across all knowledge sources (menu, FAQ, policies).
-    Merges and sorts results by relevance score.
-
-    Returns:
-        List of dicts with 'source', 'content', and 'relevance_score'.
-    """
-    results = []
-
-    # Search menu
-    menu_results = search_menu(query, k)
-    for r in menu_results:
-        results.append({
-            "source": "menu",
-            "content": f"{r['name']} (${r['price']:.2f}) — {r['description']}",
-            "relevance_score": r.get("relevance_score", 0),
-        })
-
-    # Search FAQ
-    faq_results = search_faq(query, k)
-    for r in faq_results:
-        results.append({
-            "source": "faq",
-            "content": f"Q: {r.get('question', '')}\nA: {r.get('answer', r.get('content', ''))}",
-            "relevance_score": r.get("relevance_score", 0),
-        })
-
-    # Search policies
-    policy_results = search_policies(query, k)
-    for r in policy_results:
-        results.append({
-            "source": "policies",
-            "content": f"{r.get('topic', '')}: {r.get('content', '')}",
-            "relevance_score": r.get("relevance_score", 0),
-        })
-
-    # Sort by relevance score (descending)
-    results.sort(key=lambda x: x["relevance_score"], reverse=True)
-
-    return results[:k * 2]  # return top results
-
-
 def search_allergens(item_name: str) -> str:
-    """
-    Look up allergen information for a specific menu item.
+    """Look up allergen information for a menu item by name.
 
-    Args:
-        item_name: name of the menu item, e.g. "Pizza"
-
-    Returns:
-        Human-readable allergen info string.
+    Returns a human-readable string describing allergens.
     """
     _ensure_loaded()
 
+    # Normalize the query
+    key = item_name.lower().strip()
+
     # Try exact match first
-    if item_name in _allergens:
-        allergens = _allergens[item_name]
-        if not allergens or allergens == ["none"]:
-            return f"{item_name} has no known allergens."
-        return f"{item_name} contains: {', '.join(allergens)}."
+    if key in _allergens:
+        info = _allergens[key]
+        return _format_allergen_info(item_name, info)
 
-    # Try case-insensitive match
-    for key, allergens in _allergens.items():
-        if key.lower() == item_name.lower():
-            if not allergens or allergens == ["none"]:
-                return f"{key} has no known allergens."
-            return f"{key} contains: {', '.join(allergens)}."
+    # Try partial match
+    for allergen_key, info in _allergens.items():
+        if allergen_key in key or key in allergen_key:
+            return _format_allergen_info(allergen_key, info)
 
-    return f"Sorry, I don't have allergen information for '{item_name}'."
+    return f"No allergen information found for '{item_name}'."
+
+
+def _format_allergen_info(name: str, info: dict) -> str:
+    """Format allergen info dict into a readable string."""
+    contains = info.get("contains", [])
+    may_contain = info.get("may_contain", [])
+
+    parts = [f"{name.title()}"]
+
+    if contains:
+        parts.append(f"contains: {', '.join(contains)}")
+    else:
+        parts.append("contains: no known allergens")
+
+    if may_contain:
+        parts.append(f"may contain: {', '.join(may_contain)}")
+
+    return " | ".join(parts)
+
+
+def search_all(query: str, k: int = 3) -> list[dict]:
+    """Search across all indexes (menu, FAQ, policies) in one call.
+
+    Returns combined results sorted by score (best first).
+    """
+    _ensure_loaded()
+
+    all_results = []
+
+    for index_name in ["menu", "faq", "policies"]:
+        if index_name in _indexes:
+            results = _search_index(index_name, query, k)
+            all_results.extend(results)
+
+    # Sort by score (lower L2 = better match)
+    all_results.sort(key=lambda x: x["score"])
+
+    # Return top k across all sources
+    return all_results[:k]
