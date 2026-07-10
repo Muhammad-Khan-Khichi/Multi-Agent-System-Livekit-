@@ -1,0 +1,66 @@
+﻿[
+  {
+    "id": "pizza_margherita",
+    "name": "Margherita Pizza",
+    "category": "Pizza",
+    "price": 10.0,
+    "description": "Classic wood-fired pizza with tomato sauce, fresh mozzarella, and basil.",
+    "tags": ["vegetarian"]
+  },
+  {
+    "id": "pizza_pepperoni",
+    "name": "Pepperoni Pizza",
+    "category": "Pizza",
+    "price": 12.0,
+    "description": "Wood-fired pizza topped with tomato sauce, mozzarella, and spicy pepperoni.",
+    "tags": []
+  },
+  {
+    "id": "salad_caesar",
+    "name": "Caesar Salad",
+    "category": "Salad",
+    "price": 5.0,
+    "description": "Crisp romaine lettuce, parmesan, croutons, and creamy Caesar dressing.",
+    "tags": ["vegetarian"]
+  },
+  {
+    "id": "salad_greek",
+    "name": "Greek Salad",
+    "category": "Salad",
+    "price": 6.0,
+    "description": "Tomato, cucumber, red onion, olives, and feta cheese with olive oil dressing.",
+    "tags": ["vegetarian", "gluten-free"]
+  },
+  {
+    "id": "ice_cream_vanilla",
+    "name": "Vanilla Ice Cream",
+    "category": "Dessert",
+    "price": 3.0,
+    "description": "Two scoops of classic vanilla bean ice cream.",
+    "tags": ["vegetarian", "gluten-free"]
+  },
+  {
+    "id": "ice_cream_chocolate",
+    "name": "Chocolate Ice Cream",
+    "category": "Dessert",
+    "price": 3.5,
+    "description": "Two scoops of rich Belgian chocolate ice cream.",
+    "tags": ["vegetarian", "gluten-free"]
+  },
+  {
+    "id": "coffee_espresso",
+    "name": "Espresso",
+    "category": "Drinks",
+    "price": 2.0,
+    "description": "Double shot of freshly ground Italian espresso.",
+    "tags": ["vegan", "gluten-free"]
+  },
+  {
+    "id": "coffee_latte",
+    "name": "Latte",
+    "category": "Drinks",
+    "price": 3.0,
+    "description": "Espresso with steamed milk and a light layer of foam.",
+    "tags": ["vegetarian", "gluten-free"]
+  }
+]
