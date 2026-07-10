@@ -1,78 +1,78 @@
-﻿"""
-FAQ Agent — answers general questions about the restaurant using RAG.
-Handles questions about hours, location, policies, allergens, etc.
-"""
+﻿from __future__ import annotations
 
 import logging
 
-from agents import Agent, RunContext
+from livekit.agents import Agent, RunContext, inference
+from livekit.agents.llm import function_tool
+
+from agents.base import BaseAgent
+from config import VOICES
 from rag import search
+from userData import UserData
 
-logger = logging.getLogger("agents.faq")
+logger = logging.getLogger("restaurant-example")
 
-FAQ_INSTRUCTIONS = """
-You are the FAQ Agent for a restaurant chatbot.
-
-Your job:
-- Answer general questions about the restaurant (hours, location, parking,
-  delivery, policies, allergens, etc.).
-- Use the search results provided to you to give accurate answers.
-- If you don't find relevant info, say you're not sure and offer to connect
-  the user to a human.
-
-Tone:
-- Friendly, concise, and helpful.
-- Keep answers short —1-3 sentences.
-
-Handing back:
-- If the user wants to make a reservation, order takeaway, or checkout,
-  say "Let me connect you to the right agent." and return control to the
-  greeter agent.
-"""
+RunContext_T = RunContext[UserData]
 
 
-async def faq_instructions(run_context: RunContext) -> str:
-    """Dynamically inject search results into the FAQ agent's instructions."""
-    user_msg = run_context.history[-1]["content"] if run_context.history else ""
+class FAQAgent(BaseAgent):
+    def __init__(self) -> None:
+        super().__init__(
+            instructions=(
+                "You are the FAQ Agent for a restaurant.\n"
+                "Your job is to answer general questions about the restaurant such as:\n"
+                "- Hours, location, parking\n"
+                "- Delivery info, policies (cancellation, refund, payment)\n"
+                "- Allergen information\n"
+                "- Vegetarian/vegan options\n"
+                "Use the search_faq_knowledge tool to look up answers — do not guess.\n"
+                "Keep answers short and friendly — 1 to 3 sentences.\n"
+                "If the user wants to make a reservation, place an order, or checkout,\n"
+                "use the to_greeter tool to transfer them back."
+            ),
+            llm=inference.LLM(
+                model="openai/gpt-4.1-mini",
+                extra_kwargs={"parallel_tool_calls": False},
+            ),
+            tools=[search_faq_knowledge],
+            tts=inference.TTS(model="cartesia/sonic-3", voice=VOICES["faq"]),
+        )
 
-    # Search across all knowledge sources
-    results = search.search_all(user_msg, k=3)
+    @function_tool()
+    async def to_greeter(self, context: RunContext_T) -> tuple[Agent, str]:
+        """Called when the user wants to make a reservation, place a takeaway
+        order, or proceed to checkout. Transfers the user back to the greeter
+        who will route them to the correct agent."""
+        return await self._transfer_to_agent("greeter", context)
 
-    # Also check for allergen-specific queries
-    allergen_info = ""
-    if "allergen" in user_msg.lower() or "allergy" in user_msg.lower():
-        # Try to extract item name from the message
-        for word in user_msg.split():
-            info = search.search_allergens(word.strip("?,.!"))
-            if "contains" in info or "no known allergens" in info:
-                allergen_info = info
-                break
 
-    # Build context from search results
-    context_parts = []
+@function_tool()
+async def search_faq_knowledge(context: RunContext_T, query: str) -> str:
+    """Search the restaurant's FAQ, policies, and allergen database for
+    information. Use this when the user asks about hours, location, parking,
+    delivery, policies, allergens, or any general restaurant question.
+
+    Args:
+        query: The user's question in natural language.
+    """
+    results = search.search_all(query, k=3)
+
+    if not results:
+        return "No relevant information found."
+
+    parts = []
     for r in results:
         source = r.get("source", "unknown")
         content = r.get("content", "")
-        context_parts.append(f"[{source}] {content}")
+        parts.append(f"[{source}] {content}")
 
-    knowledge_context = "\n".join(context_parts) if context_parts else "No relevant information found."
+    # Also check for allergen-specific queries
+    query_lower = query.lower()
+    if "allergen" in query_lower or "allergy" in query_lower or "gluten" in query_lower:
+        for word in query.split():
+            info = search.search_allergens(word.strip("?,.!"))
+            if "contains" in info or "no known allergens" in info:
+                parts.append(f"[allergens] {info}")
+                break
 
-    if allergen_info:
-        knowledge_context += f"\n\n[allergens] {allergen_info}"
-
-    return f"""{FAQ_INSTRUCTIONS}
-
---- Knowledge Base Results ---
-{knowledge_context}
---- End Knowledge Base ---
-
-Use the above information to answer the user's question. If the information
-isn't relevant, say you're not sure.
-"""
-
-
-faq_agent = Agent(
-    name="FAQ Agent",
-    instructions=faq_instructions,
-    model="gpt-4o-mini",
-)
+    return "\n".join(parts) if parts else "No relevant information found."
