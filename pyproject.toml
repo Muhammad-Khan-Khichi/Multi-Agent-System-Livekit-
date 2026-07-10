@@ -1,0 +1,18 @@
+[project]
+name = "resturant-ag"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "faiss-cpu>=1.14.3",
+    "httpx>=0.28.1",
+    "livekit-agents[dev]>=1.6.5",
+    "livekit-plugins-assemblyai>=1.6.5",
+    "livekit-plugins-cartesia>=1.6.5",
+    "livekit-plugins-openai>=1.6.5",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "sentence-transformers>=5.6.0",
+]
