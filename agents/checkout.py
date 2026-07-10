@@ -8,6 +8,7 @@ from agents.base import BaseAgent
 from config import VOICES
 from tools import to_greeter, update_name, update_phone
 from userData import UserData
+from utils import validate_credit_card, validate_expiry, validate_cvv
 
 RunContext_T = RunContext[UserData]
 
@@ -32,25 +33,49 @@ class Checkout(BaseAgent):
         context: RunContext_T,
     ) -> str:
         """Called when the user confirms the expense."""
+        if expense <= 0:
+            return "The expense must be greater than zero. Please confirm the correct amount."
+
         userdata = context.userdata
         userdata.expense = expense
-        return f"The expense is confirmed to be {expense}"
+        return f"The expense is confirmed to be ${expense:.2f}"
 
     @function_tool()
     async def update_credit_card(
         self,
         number: Annotated[str, Field(description="The credit card number")],
-        expiry: Annotated[str, Field(description="The expiry date of the credit card")],
+        expiry: Annotated[str, Field(description="The expiry date of the credit card in MM/YY format")],
         cvv: Annotated[str, Field(description="The CVV of the credit card")],
         context: RunContext_T,
     ) -> str:
         """Called when the user provides their credit card number, expiry date, and CVV.
         Confirm the spelling with the user before calling the function."""
+        # Validate credit card number
+        if not validate_credit_card(number):
+            return (
+                "That doesn't look like a valid credit card number. "
+                "Please provide a valid card number."
+            )
+
+        # Validate expiry date
+        if not validate_expiry(expiry):
+            return (
+                "The expiry date format is invalid. "
+                "Please provide it in MM/YY format, e.g. 03/27."
+            )
+
+        # Validate CVV
+        if not validate_cvv(cvv):
+            return (
+                "The CVV is invalid. It should be 3 or 4 digits. "
+                "Please try again."
+            )
+
         userdata = context.userdata
         userdata.customer_credit_card = number
         userdata.customer_credit_card_expiry = expiry
         userdata.customer_credit_card_cvv = cvv
-        return f"The credit card number is updated to {number}"
+        return f"The credit card ending in {number[-4:]} has been updated successfully."
 
     @function_tool()
     async def confirm_checkout(self, context: RunContext_T) -> str | tuple[Agent, str]:
